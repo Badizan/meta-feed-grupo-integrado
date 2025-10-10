@@ -5,6 +5,9 @@ on:
     - cron: '0 6 * * *'  # Executa todo dia às 06:00 (horário de Brasília)
   workflow_dispatch:  # Permite execução manual via GitHub UI
 
+permissions:
+  contents: write  # necessário para permitir git push com GITHUB_TOKEN
+
 jobs:
   update-feed:
     runs-on: ubuntu-latest
@@ -13,7 +16,7 @@ jobs:
       - name: Checkout do código
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
