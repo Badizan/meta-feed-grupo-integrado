@@ -1,0 +1,37 @@
+name: Atualizar Feed Meta Diariamente
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # Executa todo dia às 06:00 (horário de Brasília)
+  workflow_dispatch:  # Permite execução manual via GitHub UI
+
+jobs:
+  update-feed:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: Executar script e gerar CSV
+        env:
+          STRAPI_TOKEN: ${{ secrets.STRAPI_TOKEN }}
+        run: node gerar_feed_meta.js
+
+      - name: Commit e push do CSV atualizado
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add meta_feed.csv
+          git diff --staged --quiet || git commit -m "🤖 Atualização automática do feed_meta.csv - $(date '+%Y-%m-%d %H:%M:%S')"
+          git push
