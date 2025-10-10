@@ -1,0 +1,24 @@
+{
+    "name": "facebook-feed-generator",
+    "version": "1.0.0",
+    "description": "Gerador de feed CSV para Meta Ads a partir do Strapi",
+    "type": "module",
+    "main": "gerar_feed_meta.js",
+    "scripts": {
+        "start": "node gerar_feed_meta.js",
+        "generate": "node gerar_feed_meta.js"
+    },
+    "dependencies": {
+        "node-fetch": "^3.3.2"
+    },
+    "keywords": [
+        "facebook",
+        "meta",
+        "ads",
+        "csv",
+        "feed",
+        "strapi"
+    ],
+    "author": "Grupo Integrado",
+    "license": "MIT"
+}
