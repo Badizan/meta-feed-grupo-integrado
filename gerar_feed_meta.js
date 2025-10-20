@@ -1,6 +1,6 @@
 /**
  * Gera automaticamente um feed CSV compatível com o Meta Ads (Facebook/Instagram)
- * usando os banners do Strapi (CMS do Grupo Integrado)
+ * usando os cursos do Strapi (CMS do Grupo Integrado)
  * 
  * Campos incluídos: id, title, description, availability, condition, price,
  * link, image_link, brand, category, additional_image_link,
@@ -11,7 +11,7 @@
 import fs from "fs";
 import fetch from "node-fetch";
 
-const STRAPI_URL = "https://cms-site.grupointegrado.br/api/home?populate[banner][populate]=*";
+const STRAPI_URL = "https://cms-site.grupointegrado.br/api/cursos?populate=*";
 const STRAPI_TOKEN =
   "c23794ebbaef70d9284661dfa4d8590038f9f0244770f0ee463ec2c507faf8a6a175a6a730f3cd1ab5ff5018879722d412120332e35a7b5b785a25c190eca55719575bdc8ce882babebce93498a45fb3d44f0e72e27022c364058bb209fffa999c9edd6e3d92d6108f9f48df81a2d1421da3fa3a1edf00dc04056dfb743b5e4f";
 
@@ -28,17 +28,29 @@ function escapeCsvValue(value) {
 }
 
 /**
- * Determina a categoria baseada no título/alt do banner
+ * Determina a categoria baseada no nome do curso e modalidade
  */
-function determinarCategoria(alt) {
-  if (!alt) return "Educação";
-  const altLower = alt.toLowerCase();
-  if (altLower.includes("medicina")) return "Educação > Medicina";
-  if (altLower.includes("odontologia")) return "Educação > Odontologia";
-  if (altLower.includes("vestibular")) return "Educação > Vestibular";
-  if (altLower.includes("bolsa")) return "Educação > Bolsas";
-  if (altLower.includes("ead")) return "Educação > EAD";
-  return "Educação";
+function determinarCategoria(nome, modalidade) {
+  if (!nome) return "Educação";
+  const nomeLower = nome.toLowerCase();
+  
+  // Categorias específicas por curso
+  if (nomeLower.includes("medicina")) return "Educação > Medicina";
+  if (nomeLower.includes("odontologia")) return "Educação > Odontologia";
+  if (nomeLower.includes("enfermagem")) return "Educação > Enfermagem";
+  if (nomeLower.includes("nutrição")) return "Educação > Nutrição";
+  if (nomeLower.includes("biomedicina")) return "Educação > Biomedicina";
+  if (nomeLower.includes("veterinária")) return "Educação > Veterinária";
+  if (nomeLower.includes("direito")) return "Educação > Direito";
+  if (nomeLower.includes("administração")) return "Educação > Administração";
+  if (nomeLower.includes("agronomia") || nomeLower.includes("agronegócio")) return "Educação > Agronomia";
+  if (nomeLower.includes("engenharia")) return "Educação > Engenharia";
+  if (nomeLower.includes("tecnologia") || nomeLower.includes("tecn.")) return "Educação > Tecnologia";
+  
+  // Categoria por modalidade
+  if (modalidade && modalidade.toLowerCase().includes("ead")) return "Educação > EAD";
+  
+  return "Educação > Graduação";
 }
 
 /**
@@ -83,7 +95,7 @@ function formatarRaio(valor) {
 }
 
 async function gerarFeedMeta() {
-  console.log("🔄 Buscando dados do Strapi...");
+  console.log("🔄 Buscando cursos do Strapi...");
 
   try {
     const response = await fetch(STRAPI_URL, {
@@ -96,22 +108,29 @@ async function gerarFeedMeta() {
     }
 
     const json = await response.json();
-    const banners = json.data?.attributes?.banner || [];
+    const cursos = json.data || [];
 
-    console.log(`✅ ${banners.length} banners encontrados.`);
+    // Filtrar apenas cursos que têm banner/imagem
+    const cursosComBanner = cursos.filter(curso => curso.attributes?.banner?.data);
+
+    console.log(`✅ ${cursos.length} cursos encontrados, ${cursosComBanner.length} com banner.`);
 
     // Formato oficial do Meta: coordenadas separadas por latitude/longitude
     const csvHeader =
       "id,title,description,availability,condition,price,link,image_link,brand,google_product_category,additional_image_link,availability_circle_origin.latitude,availability_circle_origin.longitude,availability_circle_radius,availability_circle_radius_unit,availability_postal_codes";
     const csvRows = [csvHeader];
 
-    banners.forEach((banner, index) => {
+    cursosComBanner.forEach((curso, index) => {
       try {
-        const id = banner.id || `banner_${index}`;
-        const title = banner.alt || "Curso Grupo Integrado";
-        const description = `${banner.alt || "Curso"} - Grupo Integrado. Educação de qualidade e tradição.`;
+        const attrs = curso.attributes;
+        const id = curso.id || `curso_${index}`;
+        const title = attrs.name || "Curso Grupo Integrado";
+        const modalidade = attrs.modalidade || "";
+        const tipoCurso = attrs.tipo_curso || "Graduação";
+        const description = `${title} - ${modalidade} - Grupo Integrado. Educação de qualidade e tradição.`;
 
-        let link = banner.link || "https://www.grupointegrado.br";
+        // Link do curso
+        let link = attrs.url || "https://www.grupointegrado.br";
         if (!link.startsWith("http")) {
           link = `https://www.grupointegrado.br${link}`;
         }
@@ -120,22 +139,16 @@ async function gerarFeedMeta() {
         const condition = "new";
         const price = "0.00 BRL";
         const brand = "Grupo Integrado";
-        const category = determinarCategoria(banner.alt);
-        const coordenadas = determinarCoordenadas(banner.alt, link);
-        const postalCodes = determinarCodigosPostais(banner.alt, link);
+        const category = determinarCategoria(title, modalidade);
+        const coordenadas = determinarCoordenadas(title, link);
+        const postalCodes = determinarCodigosPostais(title, link);
 
-        // Imagens
-        const desktop = banner.desktop?.data?.attributes?.url;
-        const mobile = banner.mobile?.data?.attributes?.url;
-        const image_link = desktop
-          ? (desktop.startsWith("http") ? desktop : `https://cms-site.grupointegrado.br${desktop}`)
-          : mobile
-          ? (mobile.startsWith("http") ? mobile : `https://cms-site.grupointegrado.br${mobile}`)
-          : "";
-        const additional_image_link =
-          desktop && mobile && mobile !== desktop
-            ? (mobile.startsWith("http") ? mobile : `https://cms-site.grupointegrado.br${mobile}`)
-            : "";
+        // Imagens do banner
+        const bannerData = attrs.banner?.data?.attributes;
+        const image_link = bannerData?.url || "";
+        
+        // Imagem adicional (usar formato medium se disponível)
+        const additional_image_link = bannerData?.formats?.large?.url || bannerData?.formats?.medium?.url || "";
 
         // Separar coordenadas em latitude e longitude (formato oficial do Meta)
         const [latitude, longitude] = coordenadas.origin.split(',').map(coord => parseFloat(coord.trim()).toFixed(6));
@@ -162,14 +175,15 @@ async function gerarFeedMeta() {
 
         csvRows.push(csvRow);
       } catch (error) {
-        console.warn(`⚠️ Erro ao processar banner ${banner.id || index}:`, error.message);
+        console.warn(`⚠️ Erro ao processar curso ${curso.id || index}:`, error.message);
       }
     });
 
     fs.writeFileSync("meta_feed.csv", csvRows.join("\n"), "utf8");
     console.log("📦 Arquivo meta_feed.csv gerado com sucesso!");
+    console.log(`📊 Total de ${cursosComBanner.length} cursos exportados`);
     console.log("💡 Esta versão usa coordenadas GPS (formato Facebook: lat,lng)");
-    console.log("🔗 URL fixa: https://raw.githubusercontent.com/seuusuario/meta-feed-grupo-integrado/main/meta_feed.csv");
+    console.log("🔗 URL fixa: https://raw.githubusercontent.com/Badizan/meta-feed-grupo-integrado/main/meta_feed.csv");
   } catch (error) {
     console.error("❌ Erro geral:", error.message);
   }
