@@ -13,6 +13,7 @@ import fetch from "node-fetch";
 
 const STRAPI_BANNERS_URL = "https://cms-site.grupointegrado.br/api/home?populate[banner][populate]=*";
 const STRAPI_CURSOS_URL = "https://cms-site.grupointegrado.br/api/cursos?populate=*";
+const STRAPI_UPLOAD_URL = "https://cms-site.grupointegrado.br/api/upload/files";
 const STRAPI_TOKEN =
   "c23794ebbaef70d9284661dfa4d8590038f9f0244770f0ee463ec2c507faf8a6a175a6a730f3cd1ab5ff5018879722d412120332e35a7b5b785a25c190eca55719575bdc8ce882babebce93498a45fb3d44f0e72e27022c364058bb209fffa999c9edd6e3d92d6108f9f48df81a2d1421da3fa3a1edf00dc04056dfb743b5e4f";
 
@@ -26,6 +27,64 @@ function escapeCsvValue(value) {
     return `"${stringValue.replace(/"/g, '""')}"`;
   }
   return stringValue;
+}
+
+/**
+ * Busca imagens específicas da pasta "Meta Ads" e cria mapeamento por nome do curso
+ */
+async function buscarImagensMetaAds() {
+  try {
+    const response = await fetch(`${STRAPI_UPLOAD_URL}?filters[folder][name][$eq]=Meta Ads`, {
+      headers: { Authorization: `Bearer ${STRAPI_TOKEN}` },
+    });
+
+    if (!response.ok) {
+      console.warn("⚠️ Pasta 'Meta Ads' não encontrada ou vazia. Usando imagens padrão dos cursos.");
+      return {};
+    }
+
+    const files = await response.json();
+    const mapeamento = {};
+
+    // Mapear imagens por nome do curso (normalizado)
+    files.forEach(file => {
+      // Extrair nome do curso do nome do arquivo (ex: "nutricao-meta.webp" -> "nutricao")
+      const nomeArquivo = file.name.toLowerCase()
+        .replace(/-meta|-ads|_meta|_ads/g, '') // Remove sufixos como -meta, -ads
+        .replace(/\.(jpg|jpeg|png|webp)$/i, '') // Remove extensão
+        .trim();
+      
+      mapeamento[nomeArquivo] = file;
+    });
+
+    console.log(`✅ ${Object.keys(mapeamento).length} imagens específicas encontradas na pasta Meta Ads`);
+    return mapeamento;
+  } catch (error) {
+    console.warn("⚠️ Erro ao buscar imagens Meta Ads:", error.message);
+    return {};
+  }
+}
+
+/**
+ * Encontra imagem específica do Meta Ads para um curso
+ */
+function encontrarImagemMetaAds(nomeCurso, mapeamentoImagens) {
+  if (!nomeCurso || Object.keys(mapeamentoImagens).length === 0) return null;
+  
+  // Normalizar nome do curso para busca
+  const nomeNormalizado = nomeCurso.toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove acentos
+    .replace(/[^a-z0-9]/g, ''); // Remove caracteres especiais
+  
+  // Buscar no mapeamento (tentando variações)
+  for (const [chave, imagem] of Object.entries(mapeamentoImagens)) {
+    const chaveNormalizada = chave.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, '');
+    if (nomeNormalizado.includes(chaveNormalizada) || chaveNormalizada.includes(nomeNormalizado)) {
+      return imagem;
+    }
+  }
+  
+  return null;
 }
 
 /**
@@ -96,9 +155,12 @@ function formatarRaio(valor) {
 }
 
 async function gerarFeedMeta() {
-  console.log("🔄 Buscando banners e cursos do Strapi...");
+  console.log("🔄 Buscando banners, cursos e imagens Meta Ads do Strapi...");
 
   try {
+    // Buscar imagens específicas da pasta Meta Ads
+    const imagensMetaAds = await buscarImagensMetaAds();
+
     // Buscar banners
     const bannersResponse = await fetch(STRAPI_BANNERS_URL, {
       headers: { Authorization: `Bearer ${STRAPI_TOKEN}` },
@@ -219,15 +281,15 @@ async function gerarFeedMeta() {
         const coordenadas = determinarCoordenadas(title, link);
         const postalCodes = determinarCodigosPostais(title, link);
 
-        // Imagens - priorizar imagem_meta_ads se existir, senão usar banner
-        const imagemMetaAds = attrs.imagem_meta_ads?.data?.attributes;
-        const bannerData = attrs.banner?.data?.attributes;
+        // Buscar imagem específica do Meta Ads para este curso
+        const imagemMetaAds = encontrarImagemMetaAds(title, imagensMetaAds);
         
-        // Imagem principal: usa imagem_meta_ads se existir, senão usa banner
+        // Imagens: prioriza Meta Ads, depois banner padrão
+        const bannerData = attrs.banner?.data?.attributes;
         const image_link = imagemMetaAds?.url || bannerData?.url || "";
         
         // Imagem adicional: usa formato large/medium da imagem escolhida
-        const additional_image_link = imagemMetaAds 
+        const additional_image_link = imagemMetaAds
           ? (imagemMetaAds.formats?.large?.url || imagemMetaAds.formats?.medium?.url || "")
           : (bannerData?.formats?.large?.url || bannerData?.formats?.medium?.url || "");
 
