@@ -219,12 +219,17 @@ async function gerarFeedMeta() {
         const coordenadas = determinarCoordenadas(title, link);
         const postalCodes = determinarCodigosPostais(title, link);
 
-        // Imagens do banner
+        // Imagens - priorizar imagem_meta_ads se existir, senão usar banner
+        const imagemMetaAds = attrs.imagem_meta_ads?.data?.attributes;
         const bannerData = attrs.banner?.data?.attributes;
-        const image_link = bannerData?.url || "";
         
-        // Imagem adicional (usar formato medium se disponível)
-        const additional_image_link = bannerData?.formats?.large?.url || bannerData?.formats?.medium?.url || "";
+        // Imagem principal: usa imagem_meta_ads se existir, senão usa banner
+        const image_link = imagemMetaAds?.url || bannerData?.url || "";
+        
+        // Imagem adicional: usa formato large/medium da imagem escolhida
+        const additional_image_link = imagemMetaAds 
+          ? (imagemMetaAds.formats?.large?.url || imagemMetaAds.formats?.medium?.url || "")
+          : (bannerData?.formats?.large?.url || bannerData?.formats?.medium?.url || "");
 
         // Separar coordenadas em latitude e longitude (formato oficial do Meta)
         const [latitude, longitude] = coordenadas.origin.split(',').map(coord => parseFloat(coord.trim()).toFixed(6));
