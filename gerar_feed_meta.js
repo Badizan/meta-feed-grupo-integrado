@@ -13,7 +13,6 @@ import fetch from "node-fetch";
 
 const STRAPI_BANNERS_URL = "https://cms-site.grupointegrado.br/api/home?populate[banner][populate]=*";
 const STRAPI_CURSOS_URL = "https://cms-site.grupointegrado.br/api/cursos?populate=*";
-const STRAPI_MEDIA_URL = "https://cms-site.grupointegrado.br/api/upload/files";
 const STRAPI_TOKEN =
   "c23794ebbaef70d9284661dfa4d8590038f9f0244770f0ee463ec2c507faf8a6a175a6a730f3cd1ab5ff5018879722d412120332e35a7b5b785a25c190eca55719575bdc8ce882babebce93498a45fb3d44f0e72e27022c364058bb209fffa999c9edd6e3d92d6108f9f48df81a2d1421da3fa3a1edf00dc04056dfb743b5e4f";
 
@@ -27,43 +26,6 @@ function escapeCsvValue(value) {
     return `"${stringValue.replace(/"/g, '""')}"`;
   }
   return stringValue;
-}
-
-/**
- * Busca imagens da pasta meta_ads na Media Library
- */
-async function buscarImagensMetaAds() {
-  try {
-    const response = await fetch(STRAPI_MEDIA_URL, {
-      headers: { Authorization: `Bearer ${STRAPI_TOKEN}` },
-    });
-
-    if (!response.ok) {
-      console.warn("⚠️ Não foi possível buscar imagens da pasta meta_ads");
-      return {};
-    }
-
-    const files = await response.json();
-    const imagensMetaAds = {};
-
-    // Filtrar apenas imagens da pasta meta_ads
-    files.forEach(file => {
-      if (file.folderPath && file.folderPath.includes("meta_ads")) {
-        // Extrair ID do nome do arquivo (ex: "23.png" → 23)
-        const match = file.name.match(/^(\d+)\.(png|jpg|jpeg|webp)$/i);
-        if (match) {
-          const cursoId = match[1];
-          imagensMetaAds[cursoId] = file.url;
-        }
-      }
-    });
-
-    console.log(`📸 ${Object.keys(imagensMetaAds).length} imagens personalizadas encontradas em meta_ads/`);
-    return imagensMetaAds;
-  } catch (error) {
-    console.warn("⚠️ Erro ao buscar imagens meta_ads:", error.message);
-    return {};
-  }
 }
 
 /**
@@ -134,12 +96,9 @@ function formatarRaio(valor) {
 }
 
 async function gerarFeedMeta() {
-  console.log("🔄 Buscando banners, cursos e imagens personalizadas do Strapi...");
+  console.log("🔄 Buscando banners e cursos do Strapi...");
 
   try {
-    // Buscar imagens da pasta meta_ads
-    const imagensMetaAds = await buscarImagensMetaAds();
-
     // Buscar banners
     const bannersResponse = await fetch(STRAPI_BANNERS_URL, {
       headers: { Authorization: `Bearer ${STRAPI_TOKEN}` },
@@ -164,10 +123,8 @@ async function gerarFeedMeta() {
     const cursosJson = await cursosResponse.json();
     const cursos = cursosJson.data || [];
 
-    // Filtrar apenas cursos que têm banner/imagem OU imagem personalizada
-    const cursosComBanner = cursos.filter(curso => 
-      curso.attributes?.banner?.data || imagensMetaAds[curso.id]
-    );
+    // Filtrar apenas cursos que têm banner/imagem
+    const cursosComBanner = cursos.filter(curso => curso.attributes?.banner?.data);
 
     console.log(`✅ ${banners.length} banners + ${cursosComBanner.length} cursos encontrados.`);
 
@@ -213,24 +170,24 @@ async function gerarFeedMeta() {
         const [latitude, longitude] = coordenadas.origin.split(',').map(coord => parseFloat(coord.trim()).toFixed(6));
         const radiusFormatted = formatarRaio(coordenadas.radius);
 
-        const csvRow = [
-          escapeCsvValue(id),
-          escapeCsvValue(title),
-          escapeCsvValue(description),
-          availability,
-          condition,
-          price,
-          escapeCsvValue(link),
-          escapeCsvValue(image_link),
-          escapeCsvValue(brand),
-          escapeCsvValue(category),
-          escapeCsvValue(additional_image_link),
+         const csvRow = [
+           escapeCsvValue(id),
+           escapeCsvValue(title),
+           escapeCsvValue(description),
+           availability,
+           condition,
+           price,
+           escapeCsvValue(link),
+           escapeCsvValue(image_link),
+           escapeCsvValue(brand),
+           escapeCsvValue(category),
+           escapeCsvValue(additional_image_link),
           escapeCsvValue(latitude),
           escapeCsvValue(longitude),
           escapeCsvValue(radiusFormatted.replace(' km', '')),
           "km",
-          escapeCsvValue(postalCodes),
-        ].join(",");
+           escapeCsvValue(postalCodes),
+         ].join(",");
 
         csvRows.push(csvRow);
       } catch (error) {
@@ -262,16 +219,16 @@ async function gerarFeedMeta() {
         const coordenadas = determinarCoordenadas(title, link);
         const postalCodes = determinarCodigosPostais(title, link);
 
-        // Imagens: priorizar imagem_meta_ads, senão usar banner
-        const imagemMetaAds = imagensMetaAds[curso.id];
+        // Imagens - priorizar imagem_meta_ads se existir, senão usar banner
+        const imagemMetaAds = attrs.imagem_meta_ads?.data?.attributes;
         const bannerData = attrs.banner?.data?.attributes;
         
         // Imagem principal: usa imagem_meta_ads se existir, senão usa banner
-        const image_link = imagemMetaAds || bannerData?.url || "";
+        const image_link = imagemMetaAds?.url || bannerData?.url || "";
         
-        // Imagem adicional: só usa se não tiver imagem_meta_ads
+        // Imagem adicional: usa formato large/medium da imagem escolhida
         const additional_image_link = imagemMetaAds 
-          ? "" 
+          ? (imagemMetaAds.formats?.large?.url || imagemMetaAds.formats?.medium?.url || "")
           : (bannerData?.formats?.large?.url || bannerData?.formats?.medium?.url || "");
 
         // Separar coordenadas em latitude e longitude (formato oficial do Meta)
