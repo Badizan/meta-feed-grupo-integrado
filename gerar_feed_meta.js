@@ -13,7 +13,7 @@ import fetch from "node-fetch";
 
 const STRAPI_BANNERS_URL = "https://cms-site.grupointegrado.br/api/home?populate[banner][populate]=*";
 const STRAPI_CURSOS_URL = "https://cms-site.grupointegrado.br/api/cursos?populate=*";
-const STRAPI_MEDIA_URL = "https://cms-site.grupointegrado.br/api/upload/files?filters[folder][name][$eq]=meta-ads&populate=*";
+const STRAPI_MEDIA_URL = "https://cms-site.grupointegrado.br/api/upload/files";
 const STRAPI_TOKEN =
   "c23794ebbaef70d9284661dfa4d8590038f9f0244770f0ee463ec2c507faf8a6a175a6a730f3cd1ab5ff5018879722d412120332e35a7b5b785a25c190eca55719575bdc8ce882babebce93498a45fb3d44f0e72e27022c364058bb209fffa999c9edd6e3d92d6108f9f48df81a2d1421da3fa3a1edf00dc04056dfb743b5e4f";
 
@@ -30,16 +30,40 @@ function escapeCsvValue(value) {
 }
 
 /**
- * Normaliza o nome do curso para buscar a imagem correspondente
- * Remove acentos, espaços, caracteres especiais e converte para minúsculo
+ * Busca imagens da pasta meta_ads na Media Library
  */
-function normalizarNomeCurso(nome) {
-  if (!nome) return "";
-  return nome
-    .toLowerCase()
-    .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remove acentos
-    .replace(/[^a-z0-9]+/g, "-") // Substitui caracteres especiais por hífen
-    .replace(/^-+|-+$/g, ""); // Remove hífens do início e fim
+async function buscarImagensMetaAds() {
+  try {
+    const response = await fetch(STRAPI_MEDIA_URL, {
+      headers: { Authorization: `Bearer ${STRAPI_TOKEN}` },
+    });
+
+    if (!response.ok) {
+      console.warn("⚠️ Não foi possível buscar imagens da pasta meta_ads");
+      return {};
+    }
+
+    const files = await response.json();
+    const imagensMetaAds = {};
+
+    // Filtrar apenas imagens da pasta meta_ads
+    files.forEach(file => {
+      if (file.folderPath && file.folderPath.includes("meta_ads")) {
+        // Extrair ID do nome do arquivo (ex: "23.png" → 23)
+        const match = file.name.match(/^(\d+)\.(png|jpg|jpeg|webp)$/i);
+        if (match) {
+          const cursoId = match[1];
+          imagensMetaAds[cursoId] = file.url;
+        }
+      }
+    });
+
+    console.log(`📸 ${Object.keys(imagensMetaAds).length} imagens personalizadas encontradas em meta_ads/`);
+    return imagensMetaAds;
+  } catch (error) {
+    console.warn("⚠️ Erro ao buscar imagens meta_ads:", error.message);
+    return {};
+  }
 }
 
 /**
@@ -110,9 +134,12 @@ function formatarRaio(valor) {
 }
 
 async function gerarFeedMeta() {
-  console.log("🔄 Buscando banners, cursos e imagens Meta Ads do Strapi...");
+  console.log("🔄 Buscando banners, cursos e imagens personalizadas do Strapi...");
 
   try {
+    // Buscar imagens da pasta meta_ads
+    const imagensMetaAds = await buscarImagensMetaAds();
+
     // Buscar banners
     const bannersResponse = await fetch(STRAPI_BANNERS_URL, {
       headers: { Authorization: `Bearer ${STRAPI_TOKEN}` },
@@ -137,30 +164,10 @@ async function gerarFeedMeta() {
     const cursosJson = await cursosResponse.json();
     const cursos = cursosJson.data || [];
 
-    // Buscar imagens da pasta meta-ads
-    const metaAdsResponse = await fetch(STRAPI_MEDIA_URL, {
-      headers: { Authorization: `Bearer ${STRAPI_TOKEN}` },
-    });
-
-    let imagensMetaAds = {};
-    if (metaAdsResponse.ok) {
-      const metaAdsJson = await metaAdsResponse.json();
-      const arquivos = metaAdsJson || [];
-      
-      // Criar mapa: nome-do-curso -> URL da imagem
-      arquivos.forEach(arquivo => {
-        const nomeArquivo = arquivo.name?.replace(/\.[^/.]+$/, ""); // Remove extensão
-        const nomeNormalizado = normalizarNomeCurso(nomeArquivo);
-        imagensMetaAds[nomeNormalizado] = arquivo.url;
-      });
-      
-      console.log(`📸 ${Object.keys(imagensMetaAds).length} imagens Meta Ads encontradas na pasta`);
-    } else {
-      console.warn("⚠️  Pasta meta-ads não encontrada ou vazia. Usando imagens dos banners.");
-    }
-
-    // Filtrar apenas cursos que têm banner/imagem
-    const cursosComBanner = cursos.filter(curso => curso.attributes?.banner?.data);
+    // Filtrar apenas cursos que têm banner/imagem OU imagem personalizada
+    const cursosComBanner = cursos.filter(curso => 
+      curso.attributes?.banner?.data || imagensMetaAds[curso.id]
+    );
 
     console.log(`✅ ${banners.length} banners + ${cursosComBanner.length} cursos encontrados.`);
 
@@ -255,16 +262,17 @@ async function gerarFeedMeta() {
         const coordenadas = determinarCoordenadas(title, link);
         const postalCodes = determinarCodigosPostais(title, link);
 
-        // Buscar imagem específica para Meta Ads (da pasta meta-ads)
-        const nomeNormalizado = normalizarNomeCurso(title);
-        const imagemMetaAds = imagensMetaAds[nomeNormalizado];
-        
-        // Imagens: priorizar imagem Meta Ads, senão usar banner
+        // Imagens: priorizar imagem_meta_ads, senão usar banner
+        const imagemMetaAds = imagensMetaAds[curso.id];
         const bannerData = attrs.banner?.data?.attributes;
+        
+        // Imagem principal: usa imagem_meta_ads se existir, senão usa banner
         const image_link = imagemMetaAds || bannerData?.url || "";
         
-        // Imagem adicional (usar formato medium se disponível do banner)
-        const additional_image_link = bannerData?.formats?.large?.url || bannerData?.formats?.medium?.url || "";
+        // Imagem adicional: só usa se não tiver imagem_meta_ads
+        const additional_image_link = imagemMetaAds 
+          ? "" 
+          : (bannerData?.formats?.large?.url || bannerData?.formats?.medium?.url || "");
 
         // Separar coordenadas em latitude e longitude (formato oficial do Meta)
         const [latitude, longitude] = coordenadas.origin.split(',').map(coord => parseFloat(coord.trim()).toFixed(6));
