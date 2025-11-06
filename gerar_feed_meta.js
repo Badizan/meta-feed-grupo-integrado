@@ -220,14 +220,21 @@ async function gerarFeedMeta() {
         const postalCodes = determinarCodigosPostais(title, link);
 
         // Imagens - priorizar imagem_meta_ads se existir, senão usar banner
-        const imagemMetaAds = attrs.imagem_meta_ads?.data?.attributes;
+        // imagem_meta_ads agora é múltiplo (array), pega a primeira imagem
+        const imagemMetaAdsArray = attrs.imagem_meta_ads?.data;
+        const imagemMetaAds = Array.isArray(imagemMetaAdsArray) && imagemMetaAdsArray.length > 0
+          ? imagemMetaAdsArray[0]?.attributes
+          : imagemMetaAdsArray?.attributes; // fallback para formato antigo (single)
         const bannerData = attrs.banner?.data?.attributes;
         
-        // Imagem principal: usa imagem_meta_ads se existir, senão usa banner
+        // Imagem principal: usa primeira imagem_meta_ads se existir, senão usa banner
         const image_link = imagemMetaAds?.url || bannerData?.url || "";
         
         // Imagem adicional: usa formato large/medium da imagem escolhida
-        const additional_image_link = imagemMetaAds 
+        // Se tiver múltiplas imagens_meta_ads, usa a segunda como adicional
+        const additional_image_link = imagemMetaAdsArray && Array.isArray(imagemMetaAdsArray) && imagemMetaAdsArray.length > 1
+          ? (imagemMetaAdsArray[1]?.attributes?.formats?.large?.url || imagemMetaAdsArray[1]?.attributes?.formats?.medium?.url || imagemMetaAdsArray[1]?.attributes?.url || "")
+          : imagemMetaAds
           ? (imagemMetaAds.formats?.large?.url || imagemMetaAds.formats?.medium?.url || "")
           : (bannerData?.formats?.large?.url || bannerData?.formats?.medium?.url || "");
 
