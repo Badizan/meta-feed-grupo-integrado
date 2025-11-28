@@ -13,7 +13,7 @@ import fetch from "node-fetch";
 
 const STRAPI_BANNERS_URL = "https://cms-site.grupointegrado.br/api/home?populate[banner][populate]=*";
 const STRAPI_CURSOS_URL = "https://cms-site.grupointegrado.br/api/cursos?populate=*";
-const STRAPI_CURSOS_PAGINA_URL = "https://cms-site.grupointegrado.br/api/curso-paginas?populate=*";
+const STRAPI_CURSOS_PAGINA_URL = "https://cms-site.grupointegrado.br/api/curso-paginas?populate[imagem_meta_ads][populate]=*&populate[imagem_banner][populate]=*";
 const STRAPI_TOKEN =
   "c23794ebbaef70d9284661dfa4d8590038f9f0244770f0ee463ec2c507faf8a6a175a6a730f3cd1ab5ff5018879722d412120332e35a7b5b785a25c190eca55719575bdc8ce882babebce93498a45fb3d44f0e72e27022c364058bb209fffa999c9edd6e3d92d6108f9f48df81a2d1421da3fa3a1edf00dc04056dfb743b5e4f";
 
@@ -113,12 +113,14 @@ async function gerarFeedMeta() {
     const banners = bannersJson.data?.attributes?.banner || [];
 
     // Buscar curso-paginas com paginação (Strapi retorna 25 por página por padrão)
+    // Usar populate explícito para garantir que todas as imagens sejam retornadas
     let cursosPagina = [];
     let pagina = 1;
     let temMaisPaginas = true;
     
     while (temMaisPaginas) {
-      const urlComPaginacao = `${STRAPI_CURSOS_PAGINA_URL}&pagination[page]=${pagina}&pagination[pageSize]=100`;
+      // Usar populate explícito para imagem_meta_ads sem limite
+      const urlComPaginacao = `https://cms-site.grupointegrado.br/api/curso-paginas?populate[imagem_meta_ads][populate][*]=*&populate[imagem_banner][populate][*]=*&pagination[page]=${pagina}&pagination[pageSize]=100`;
       const cursosPaginaResponse = await fetch(urlComPaginacao, {
         headers: { Authorization: `Bearer ${STRAPI_TOKEN}` },
       });
@@ -144,9 +146,9 @@ async function gerarFeedMeta() {
       pagina++;
     }
 
-    // Filtrar APENAS curso-paginas que têm imagem_meta_ads (não usar imagem_banner)
+    // Filtrar curso-paginas que têm imagem_banner ou imagem_meta_ads
     const cursosPaginaComImagem = cursosPagina.filter(cp => 
-      cp.attributes?.imagem_meta_ads?.data
+      cp.attributes?.imagem_banner?.data || cp.attributes?.imagem_meta_ads?.data
     );
 
     console.log(`✅ ${banners.length} banners + ${cursosPaginaComImagem.length} curso-paginas encontrados.`);
@@ -247,48 +249,78 @@ async function gerarFeedMeta() {
         const [latitude, longitude] = coordenadas.origin.split(',').map(coord => parseFloat(coord.trim()).toFixed(6));
         const radiusFormatted = formatarRaio(coordenadas.radius);
 
-        // Processar imagem_meta_ads - criar uma linha para CADA imagem (TODAS as imagens)
+        // Processar imagem_meta_ads - criar uma linha para CADA imagem
         const imagemMetaAdsData = attrs.imagem_meta_ads?.data;
+        const bannerData = attrs.imagem_banner?.data?.attributes;
         
-        if (!imagemMetaAdsData) {
-          console.warn(`⚠️ Curso-pagina ${baseId} (${title}) não tem imagem_meta_ads. Pulando...`);
-          return;
-        }
-        
-        // Criar uma linha para CADA imagem do array (não limitar quantidade)
-        const imagensArray = Array.isArray(imagemMetaAdsData) ? imagemMetaAdsData : [imagemMetaAdsData];
-        
-        if (imagensArray.length === 0) {
-          console.warn(`⚠️ Curso-pagina ${baseId} (${title}) tem imagem_meta_ads vazio. Pulando...`);
-          return;
-        }
-        
-        imagensArray.forEach((imagemItem, imgIndex) => {
-          const imagemAttrs = imagemItem?.attributes;
-          if (!imagemAttrs?.url) {
-            console.warn(`⚠️ Curso-pagina ${baseId} (${title}) - Imagem ${imgIndex + 1} não tem URL válida. Pulando...`);
-            return;
-          }
+        if (imagemMetaAdsData) {
+          // Se tem imagem_meta_ads, criar uma linha para cada imagem
+          const imagensArray = Array.isArray(imagemMetaAdsData) ? imagemMetaAdsData : [imagemMetaAdsData];
           
-          const imageUrl = imagemAttrs.url;
+          // Log detalhado para debug - mostrar TODOS os cursos com imagem_meta_ads
+          console.log(`🔍 ${baseId} (${title}) - ${imagensArray.length} imagem(ns) encontrada(s)`);
+          
+          imagensArray.forEach((imagemItem, imgIndex) => {
+            const imagemAttrs = imagemItem?.attributes;
+            if (!imagemAttrs?.url) {
+              console.warn(`⚠️ Curso-pagina ${baseId} (${title}) - Imagem ${imgIndex + 1}/${imagensArray.length} não tem URL válida. Pulando...`);
+              return;
+            }
+            
+            const imageUrl = imagemAttrs.url;
+            const image_link = imageUrl.startsWith("http") 
+              ? imageUrl 
+              : `https://cms-site.grupointegrado.br${imageUrl}`;
+            
+            // Imagem adicional: usa formato large/medium da mesma imagem
+            const additionalUrl = imagemAttrs.formats?.large?.url || 
+                                 imagemAttrs.formats?.medium?.url || "";
+            const additional_image_link = additionalUrl
+              ? (additionalUrl.startsWith("http") ? additionalUrl : `https://cms-site.grupointegrado.br${additionalUrl}`)
+              : "";
+            
+            // ID único para cada imagem (adiciona índice da imagem)
+            const id = imagensArray.length > 1 
+              ? `${baseId}_img${imgIndex + 1}` 
+              : baseId;
+            
+            const csvRow = [
+              escapeCsvValue(id),
+              escapeCsvValue(title),
+              escapeCsvValue(description),
+              availability,
+              condition,
+              price,
+              escapeCsvValue(link),
+              escapeCsvValue(image_link),
+              escapeCsvValue(brand),
+              escapeCsvValue(category),
+              escapeCsvValue(additional_image_link),
+              escapeCsvValue(latitude),
+              escapeCsvValue(longitude),
+              escapeCsvValue(radiusFormatted.replace(' km', '')),
+              "km",
+              escapeCsvValue(postalCodes),
+            ].join(",");
+
+            csvRows.push(csvRow);
+            console.log(`✅ Curso-pagina adicionado: ${id} - ${title} - imagem_meta_ads [${imgIndex + 1}/${imagensArray.length}] - Imagem: OK`);
+          });
+        } else if (bannerData?.url) {
+          // Se não tem imagem_meta_ads, usa imagem_banner (fallback)
+          const imageUrl = bannerData.url;
           const image_link = imageUrl.startsWith("http") 
             ? imageUrl 
             : `https://cms-site.grupointegrado.br${imageUrl}`;
           
-          // Imagem adicional: usa formato large/medium da mesma imagem
-          const additionalUrl = imagemAttrs.formats?.large?.url || 
-                               imagemAttrs.formats?.medium?.url || "";
+          const additionalUrl = bannerData.formats?.large?.url || 
+                               bannerData.formats?.medium?.url || "";
           const additional_image_link = additionalUrl
             ? (additionalUrl.startsWith("http") ? additionalUrl : `https://cms-site.grupointegrado.br${additionalUrl}`)
             : "";
-          
-          // ID único para cada imagem (adiciona índice da imagem)
-          const id = imagensArray.length > 1 
-            ? `${baseId}_img${imgIndex + 1}` 
-            : baseId;
-          
+
           const csvRow = [
-            escapeCsvValue(id),
+            escapeCsvValue(baseId),
             escapeCsvValue(title),
             escapeCsvValue(description),
             availability,
@@ -307,8 +339,10 @@ async function gerarFeedMeta() {
           ].join(",");
 
           csvRows.push(csvRow);
-          console.log(`✅ Curso-pagina adicionado: ${id} - ${title} - imagem_meta_ads [${imgIndex + 1}/${imagensArray.length}] - Imagem: OK`);
-        });
+          console.log(`✅ Curso-pagina adicionado: ${baseId} - ${title} - imagem_banner - Imagem: OK`);
+        } else {
+          console.warn(`⚠️ Curso-pagina ${baseId} (${title}) não tem imagem válida. Pulando...`);
+        }
       } catch (error) {
         console.warn(`⚠️ Erro ao processar curso-pagina ${cursoPagina.id || index}:`, error.message);
       }
@@ -321,6 +355,8 @@ async function gerarFeedMeta() {
     // Contar quantas imagens de imagem_meta_ads foram adicionadas
     let totalImagensMetaAds = 0;
     let totalCursosComMetaAds = 0;
+    const detalhesImagens = [];
+    
     cursosPaginaComImagem.forEach(cp => {
       const attrs = cp.attributes;
       const imagemMetaAdsData = attrs.imagem_meta_ads?.data;
@@ -328,6 +364,11 @@ async function gerarFeedMeta() {
         const imagensArray = Array.isArray(imagemMetaAdsData) ? imagemMetaAdsData : [imagemMetaAdsData];
         totalImagensMetaAds += imagensArray.length;
         totalCursosComMetaAds++;
+        detalhesImagens.push({
+          id: cp.id,
+          titulo: attrs.titulo,
+          quantidade: imagensArray.length
+        });
       }
     });
     
@@ -338,6 +379,27 @@ async function gerarFeedMeta() {
     console.log(`   - ${totalBanners} banners`);
     console.log(`   - ${totalCursoPaginas} linhas de curso-páginas`);
     console.log(`📸 ${totalCursosComMetaAds} curso-páginas com imagem_meta_ads (${totalImagensMetaAds} imagens no total)`);
+    
+    // Mostrar detalhes de cada curso
+    console.log(`\n📋 Detalhamento por curso:`);
+    detalhesImagens.forEach((item, index) => {
+      console.log(`   ${index + 1}. ID ${item.id} - ${item.titulo}: ${item.quantidade} imagem(ns)`);
+    });
+    
+    // Aviso se faltarem imagens
+    const esperado = 36; // Total esperado de imagens
+    if (totalImagensMetaAds < esperado) {
+      console.log(`\n⚠️ ATENÇÃO: Esperado ${esperado} imagens, mas apenas ${totalImagensMetaAds} foram encontradas pela API!`);
+      console.log(`   Faltam ${esperado - totalImagensMetaAds} imagens que não estão sendo retornadas pelo Strapi.`);
+      console.log(`   \n   O código está processando TODAS as imagens que a API retorna.`);
+      console.log(`   O problema está no Strapi - verifique se todas as imagens foram:`);
+      console.log(`   1. ✅ Adicionadas no campo "imagem_meta_ads" (não em "imagem_banner")`);
+      console.log(`   2. ✅ Salvas (botão "Save" no Strapi)`);
+      console.log(`   3. ✅ Publicadas (não em draft - botão "Publish")`);
+      console.log(`   4. ✅ Aguarde alguns segundos após salvar/publicar`);
+    } else if (totalImagensMetaAds === esperado) {
+      console.log(`\n✅ Todas as ${esperado} imagens foram encontradas e processadas!`);
+    }
     console.log("💡 Esta versão usa coordenadas GPS (formato Facebook: lat,lng)");
     console.log("🔗 URL fixa: https://raw.githubusercontent.com/Badizan/meta-feed-grupo-integrado/main/meta_feed.csv");
   } catch (error) {
