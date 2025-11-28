@@ -13,7 +13,7 @@ import fetch from "node-fetch";
 
 const STRAPI_BANNERS_URL = "https://cms-site.grupointegrado.br/api/home?populate[banner][populate]=*";
 const STRAPI_CURSOS_URL = "https://cms-site.grupointegrado.br/api/cursos?populate=*";
-const STRAPI_CURSOS_PAGINA_URL = "https://cms-site.grupointegrado.br/api/curso-paginas?populate[imagem_meta_ads][populate]=*&populate[imagem_banner][populate]=*";
+const STRAPI_CURSOS_PAGINA_URL = "https://cms-site.grupointegrado.br/api/curso-paginas?populate=*";
 const STRAPI_TOKEN =
   "c23794ebbaef70d9284661dfa4d8590038f9f0244770f0ee463ec2c507faf8a6a175a6a730f3cd1ab5ff5018879722d412120332e35a7b5b785a25c190eca55719575bdc8ce882babebce93498a45fb3d44f0e72e27022c364058bb209fffa999c9edd6e3d92d6108f9f48df81a2d1421da3fa3a1edf00dc04056dfb743b5e4f";
 
@@ -124,17 +124,37 @@ async function gerarFeedMeta() {
     const cursosJson = await cursosResponse.json();
     const cursos = cursosJson.data || [];
 
-    // Buscar curso-paginas
-    const cursosPaginaResponse = await fetch(STRAPI_CURSOS_PAGINA_URL, {
-      headers: { Authorization: `Bearer ${STRAPI_TOKEN}` },
-    });
+    // Buscar curso-paginas com paginação (Strapi retorna 25 por página por padrão)
+    let cursosPagina = [];
+    let pagina = 1;
+    let temMaisPaginas = true;
+    
+    while (temMaisPaginas) {
+      const urlComPaginacao = `${STRAPI_CURSOS_PAGINA_URL}&pagination[page]=${pagina}&pagination[pageSize]=100`;
+      const cursosPaginaResponse = await fetch(urlComPaginacao, {
+        headers: { Authorization: `Bearer ${STRAPI_TOKEN}` },
+      });
 
-    if (!cursosPaginaResponse.ok) {
-      console.error("❌ Erro ao acessar curso-paginas do Strapi:", cursosPaginaResponse.status);
+      if (!cursosPaginaResponse.ok) {
+        console.error("❌ Erro ao acessar curso-paginas do Strapi:", cursosPaginaResponse.status);
+        break;
+      }
+
+      const cursosPaginaJson = await cursosPaginaResponse.json();
+      const paginaAtual = cursosPaginaJson.data || [];
+      cursosPagina = cursosPagina.concat(paginaAtual);
+      
+      // Verificar se há mais páginas
+      const paginacao = cursosPaginaJson.meta?.pagination;
+      if (paginacao) {
+        temMaisPaginas = pagina < paginacao.pageCount;
+        console.log(`   📄 Página ${pagina}/${paginacao.pageCount} - ${paginaAtual.length} curso-páginas`);
+      } else {
+        temMaisPaginas = paginaAtual.length > 0;
+      }
+      
+      pagina++;
     }
-
-    const cursosPaginaJson = await cursosPaginaResponse.json();
-    const cursosPagina = cursosPaginaJson.data || [];
 
     // Filtrar apenas cursos que têm banner/imagem ou imagem_meta_ads
     const cursosComBanner = cursos.filter(curso => 
@@ -305,6 +325,24 @@ async function gerarFeedMeta() {
     cursosPaginaComImagem.forEach((cursoPagina, index) => {
       try {
         const attrs = cursoPagina.attributes;
+        
+        // Debug apenas para os primeiros 3 itens
+        if (index < 3) {
+          console.log(`\n🔍 Debug curso-pagina ${cursoPagina.id}:`);
+          console.log(`  - imagem_meta_ads existe?`, !!attrs.imagem_meta_ads);
+          console.log(`  - imagem_meta_ads.data existe?`, !!attrs.imagem_meta_ads?.data);
+          if (attrs.imagem_meta_ads?.data) {
+            console.log(`  - É array?`, Array.isArray(attrs.imagem_meta_ads.data));
+            if (Array.isArray(attrs.imagem_meta_ads.data)) {
+              console.log(`  - Quantidade:`, attrs.imagem_meta_ads.data.length);
+              if (attrs.imagem_meta_ads.data.length > 0) {
+                console.log(`  - Primeira imagem URL:`, attrs.imagem_meta_ads.data[0]?.attributes?.url || "NÃO TEM");
+              }
+            } else {
+              console.log(`  - URL:`, attrs.imagem_meta_ads.data?.attributes?.url || "NÃO TEM");
+            }
+          }
+        }
         const id = `curso-pagina_${cursoPagina.id || index}`;
         const title = attrs.titulo || "Curso Grupo Integrado";
         const tipoCurso = attrs.tipo_curso || "";
@@ -339,6 +377,9 @@ async function gerarFeedMeta() {
           ? (imageUrl.startsWith("http") ? imageUrl : `https://cms-site.grupointegrado.br${imageUrl}`)
           : "";
         
+        // Debug: mostrar qual tipo de imagem está sendo usada
+        const tipoImagem = imagemMetaAds?.url ? "imagem_meta_ads" : (bannerData?.url ? "imagem_banner" : "NENHUMA");
+        
         // Imagem adicional: usa formato large/medium da imagem escolhida
         // Se tiver múltiplas imagens_meta_ads, usa a segunda como adicional
         let additionalUrl = "";
@@ -357,6 +398,12 @@ async function gerarFeedMeta() {
         const additional_image_link = additionalUrl
           ? (additionalUrl.startsWith("http") ? additionalUrl : `https://cms-site.grupointegrado.br${additionalUrl}`)
           : "";
+
+        // Só adiciona se tiver image_link válido
+        if (!image_link) {
+          console.warn(`⚠️ Curso-pagina ${id} (${title}) não tem imagem válida. Pulando...`);
+          return;
+        }
 
         // Separar coordenadas em latitude e longitude (formato oficial do Meta)
         const [latitude, longitude] = coordenadas.origin.split(',').map(coord => parseFloat(coord.trim()).toFixed(6));
@@ -382,6 +429,7 @@ async function gerarFeedMeta() {
          ].join(",");
 
         csvRows.push(csvRow);
+        console.log(`✅ Curso-pagina adicionado: ${id} - ${title} - Tipo: ${tipoImagem} - Imagem: ${image_link ? 'OK' : 'FALTANDO'}`);
       } catch (error) {
         console.warn(`⚠️ Erro ao processar curso-pagina ${cursoPagina.id || index}:`, error.message);
       }
