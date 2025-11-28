@@ -326,23 +326,6 @@ async function gerarFeedMeta() {
       try {
         const attrs = cursoPagina.attributes;
         
-        // Debug apenas para os primeiros 3 itens
-        if (index < 3) {
-          console.log(`\n🔍 Debug curso-pagina ${cursoPagina.id}:`);
-          console.log(`  - imagem_meta_ads existe?`, !!attrs.imagem_meta_ads);
-          console.log(`  - imagem_meta_ads.data existe?`, !!attrs.imagem_meta_ads?.data);
-          if (attrs.imagem_meta_ads?.data) {
-            console.log(`  - É array?`, Array.isArray(attrs.imagem_meta_ads.data));
-            if (Array.isArray(attrs.imagem_meta_ads.data)) {
-              console.log(`  - Quantidade:`, attrs.imagem_meta_ads.data.length);
-              if (attrs.imagem_meta_ads.data.length > 0) {
-                console.log(`  - Primeira imagem URL:`, attrs.imagem_meta_ads.data[0]?.attributes?.url || "NÃO TEM");
-              }
-            } else {
-              console.log(`  - URL:`, attrs.imagem_meta_ads.data?.attributes?.url || "NÃO TEM");
-            }
-          }
-        }
         const id = `curso-pagina_${cursoPagina.id || index}`;
         const title = attrs.titulo || "Curso Grupo Integrado";
         const tipoCurso = attrs.tipo_curso || "";
@@ -363,12 +346,12 @@ async function gerarFeedMeta() {
         const coordenadas = determinarCoordenadas(title, link);
         const postalCodes = determinarCodigosPostais(title, link);
 
-        // Imagens - priorizar imagem_meta_ads se existir, senão usar imagem_banner
-        // imagem_meta_ads agora é múltiplo (array), pega a primeira imagem
-        const imagemMetaAdsArray = attrs.imagem_meta_ads?.data;
-        const imagemMetaAds = Array.isArray(imagemMetaAdsArray) && imagemMetaAdsArray.length > 0
-          ? imagemMetaAdsArray[0]?.attributes
-          : imagemMetaAdsArray?.attributes; // fallback para formato antigo (single)
+        // Imagens - buscar imagem_meta_ads igual imagem_banner
+        // imagem_meta_ads é múltiplo (array), pega a primeira imagem
+        const imagemMetaAdsData = attrs.imagem_meta_ads?.data;
+        const imagemMetaAds = Array.isArray(imagemMetaAdsData) && imagemMetaAdsData.length > 0
+          ? imagemMetaAdsData[0]?.attributes
+          : imagemMetaAdsData?.attributes; // fallback se não for array
         const bannerData = attrs.imagem_banner?.data?.attributes;
         
         // Imagem principal: usa primeira imagem_meta_ads se existir, senão usa imagem_banner
@@ -380,14 +363,9 @@ async function gerarFeedMeta() {
         // Debug: mostrar qual tipo de imagem está sendo usada
         const tipoImagem = imagemMetaAds?.url ? "imagem_meta_ads" : (bannerData?.url ? "imagem_banner" : "NENHUMA");
         
-        // Imagem adicional: usa formato large/medium da imagem escolhida
-        // Se tiver múltiplas imagens_meta_ads, usa a segunda como adicional
+        // Imagem adicional: usa formato large/medium da imagem escolhida (igual imagem_banner)
         let additionalUrl = "";
-        if (imagemMetaAdsArray && Array.isArray(imagemMetaAdsArray) && imagemMetaAdsArray.length > 1) {
-          additionalUrl = imagemMetaAdsArray[1]?.attributes?.formats?.large?.url || 
-                        imagemMetaAdsArray[1]?.attributes?.formats?.medium?.url || 
-                        imagemMetaAdsArray[1]?.attributes?.url || "";
-        } else if (imagemMetaAds) {
+        if (imagemMetaAds) {
           additionalUrl = imagemMetaAds.formats?.large?.url || 
                          imagemMetaAds.formats?.medium?.url || "";
         } else if (bannerData) {
