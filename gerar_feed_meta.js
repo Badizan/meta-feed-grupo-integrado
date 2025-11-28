@@ -144,9 +144,9 @@ async function gerarFeedMeta() {
       pagina++;
     }
 
-    // Filtrar curso-paginas que têm imagem_banner ou imagem_meta_ads
+    // Filtrar APENAS curso-paginas que têm imagem_meta_ads (não usar imagem_banner)
     const cursosPaginaComImagem = cursosPagina.filter(cp => 
-      cp.attributes?.imagem_banner?.data || cp.attributes?.imagem_meta_ads?.data
+      cp.attributes?.imagem_meta_ads?.data
     );
 
     console.log(`✅ ${banners.length} banners + ${cursosPaginaComImagem.length} curso-paginas encontrados.`);
@@ -247,75 +247,48 @@ async function gerarFeedMeta() {
         const [latitude, longitude] = coordenadas.origin.split(',').map(coord => parseFloat(coord.trim()).toFixed(6));
         const radiusFormatted = formatarRaio(coordenadas.radius);
 
-        // Processar imagem_meta_ads - criar uma linha para CADA imagem
+        // Processar imagem_meta_ads - criar uma linha para CADA imagem (TODAS as imagens)
         const imagemMetaAdsData = attrs.imagem_meta_ads?.data;
-        const bannerData = attrs.imagem_banner?.data?.attributes;
         
-        if (imagemMetaAdsData) {
-          // Se tem imagem_meta_ads, criar uma linha para cada imagem
-          const imagensArray = Array.isArray(imagemMetaAdsData) ? imagemMetaAdsData : [imagemMetaAdsData];
+        if (!imagemMetaAdsData) {
+          console.warn(`⚠️ Curso-pagina ${baseId} (${title}) não tem imagem_meta_ads. Pulando...`);
+          return;
+        }
+        
+        // Criar uma linha para CADA imagem do array (não limitar quantidade)
+        const imagensArray = Array.isArray(imagemMetaAdsData) ? imagemMetaAdsData : [imagemMetaAdsData];
+        
+        if (imagensArray.length === 0) {
+          console.warn(`⚠️ Curso-pagina ${baseId} (${title}) tem imagem_meta_ads vazio. Pulando...`);
+          return;
+        }
+        
+        imagensArray.forEach((imagemItem, imgIndex) => {
+          const imagemAttrs = imagemItem?.attributes;
+          if (!imagemAttrs?.url) {
+            console.warn(`⚠️ Curso-pagina ${baseId} (${title}) - Imagem ${imgIndex + 1} não tem URL válida. Pulando...`);
+            return;
+          }
           
-          imagensArray.forEach((imagemItem, imgIndex) => {
-            const imagemAttrs = imagemItem?.attributes;
-            if (!imagemAttrs?.url) {
-              console.warn(`⚠️ Curso-pagina ${baseId} (${title}) - Imagem ${imgIndex + 1} não tem URL válida. Pulando...`);
-              return;
-            }
-            
-            const imageUrl = imagemAttrs.url;
-            const image_link = imageUrl.startsWith("http") 
-              ? imageUrl 
-              : `https://cms-site.grupointegrado.br${imageUrl}`;
-            
-            // Imagem adicional: usa formato large/medium da mesma imagem
-            const additionalUrl = imagemAttrs.formats?.large?.url || 
-                                 imagemAttrs.formats?.medium?.url || "";
-            const additional_image_link = additionalUrl
-              ? (additionalUrl.startsWith("http") ? additionalUrl : `https://cms-site.grupointegrado.br${additionalUrl}`)
-              : "";
-            
-            // ID único para cada imagem (adiciona índice da imagem)
-            const id = imagensArray.length > 1 
-              ? `${baseId}_img${imgIndex + 1}` 
-              : baseId;
-            
-            const csvRow = [
-              escapeCsvValue(id),
-              escapeCsvValue(title),
-              escapeCsvValue(description),
-              availability,
-              condition,
-              price,
-              escapeCsvValue(link),
-              escapeCsvValue(image_link),
-              escapeCsvValue(brand),
-              escapeCsvValue(category),
-              escapeCsvValue(additional_image_link),
-              escapeCsvValue(latitude),
-              escapeCsvValue(longitude),
-              escapeCsvValue(radiusFormatted.replace(' km', '')),
-              "km",
-              escapeCsvValue(postalCodes),
-            ].join(",");
-
-            csvRows.push(csvRow);
-            console.log(`✅ Curso-pagina adicionado: ${id} - ${title} - imagem_meta_ads [${imgIndex + 1}/${imagensArray.length}] - Imagem: OK`);
-          });
-        } else if (bannerData?.url) {
-          // Se não tem imagem_meta_ads, usa imagem_banner (fallback)
-          const imageUrl = bannerData.url;
+          const imageUrl = imagemAttrs.url;
           const image_link = imageUrl.startsWith("http") 
             ? imageUrl 
             : `https://cms-site.grupointegrado.br${imageUrl}`;
           
-          const additionalUrl = bannerData.formats?.large?.url || 
-                               bannerData.formats?.medium?.url || "";
+          // Imagem adicional: usa formato large/medium da mesma imagem
+          const additionalUrl = imagemAttrs.formats?.large?.url || 
+                               imagemAttrs.formats?.medium?.url || "";
           const additional_image_link = additionalUrl
             ? (additionalUrl.startsWith("http") ? additionalUrl : `https://cms-site.grupointegrado.br${additionalUrl}`)
             : "";
-
+          
+          // ID único para cada imagem (adiciona índice da imagem)
+          const id = imagensArray.length > 1 
+            ? `${baseId}_img${imgIndex + 1}` 
+            : baseId;
+          
           const csvRow = [
-            escapeCsvValue(baseId),
+            escapeCsvValue(id),
             escapeCsvValue(title),
             escapeCsvValue(description),
             availability,
@@ -334,10 +307,8 @@ async function gerarFeedMeta() {
           ].join(",");
 
           csvRows.push(csvRow);
-          console.log(`✅ Curso-pagina adicionado: ${baseId} - ${title} - imagem_banner - Imagem: OK`);
-        } else {
-          console.warn(`⚠️ Curso-pagina ${baseId} (${title}) não tem imagem válida. Pulando...`);
-        }
+          console.log(`✅ Curso-pagina adicionado: ${id} - ${title} - imagem_meta_ads [${imgIndex + 1}/${imagensArray.length}] - Imagem: OK`);
+        });
       } catch (error) {
         console.warn(`⚠️ Erro ao processar curso-pagina ${cursoPagina.id || index}:`, error.message);
       }
