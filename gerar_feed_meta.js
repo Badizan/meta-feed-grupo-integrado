@@ -97,7 +97,7 @@ function formatarRaio(valor) {
 }
 
 async function gerarFeedMeta() {
-  console.log("🔄 Buscando banners, cursos e curso-páginas do Strapi...");
+  console.log("🔄 Buscando banners e curso-páginas do Strapi...");
 
   try {
     // Buscar banners
@@ -111,18 +111,6 @@ async function gerarFeedMeta() {
 
     const bannersJson = await bannersResponse.json();
     const banners = bannersJson.data?.attributes?.banner || [];
-
-    // Buscar cursos
-    const cursosResponse = await fetch(STRAPI_CURSOS_URL, {
-      headers: { Authorization: `Bearer ${STRAPI_TOKEN}` },
-    });
-
-    if (!cursosResponse.ok) {
-      console.error("❌ Erro ao acessar cursos do Strapi:", cursosResponse.status);
-    }
-
-    const cursosJson = await cursosResponse.json();
-    const cursos = cursosJson.data || [];
 
     // Buscar curso-paginas com paginação (Strapi retorna 25 por página por padrão)
     let cursosPagina = [];
@@ -156,17 +144,12 @@ async function gerarFeedMeta() {
       pagina++;
     }
 
-    // Filtrar apenas cursos que têm banner/imagem ou imagem_meta_ads
-    const cursosComBanner = cursos.filter(curso => 
-      curso.attributes?.banner?.data || curso.attributes?.imagem_meta_ads?.data
-    );
-
     // Filtrar curso-paginas que têm imagem_banner ou imagem_meta_ads
     const cursosPaginaComImagem = cursosPagina.filter(cp => 
       cp.attributes?.imagem_banner?.data || cp.attributes?.imagem_meta_ads?.data
     );
 
-    console.log(`✅ ${banners.length} banners + ${cursosComBanner.length} cursos + ${cursosPaginaComImagem.length} curso-paginas encontrados.`);
+    console.log(`✅ ${banners.length} banners + ${cursosPaginaComImagem.length} curso-paginas encontrados.`);
 
     // Formato oficial do Meta: coordenadas separadas por latitude/longitude
     const csvHeader =
@@ -232,92 +215,6 @@ async function gerarFeedMeta() {
         csvRows.push(csvRow);
       } catch (error) {
         console.warn(`⚠️ Erro ao processar banner ${banner.id || index}:`, error.message);
-      }
-    });
-
-    // Processar cursos
-    cursosComBanner.forEach((curso, index) => {
-      try {
-        const attrs = curso.attributes;
-        const id = `curso_${curso.id || index}`;
-        const title = attrs.name || "Curso Grupo Integrado";
-        const modalidade = attrs.modalidade || "";
-        const tipoCurso = attrs.tipo_curso || "Graduação";
-        const description = `${title} - ${modalidade} - Grupo Integrado. Educação de qualidade e tradição.`;
-
-        // Link do curso
-        let link = attrs.url || "https://www.grupointegrado.br";
-        if (!link.startsWith("http")) {
-          link = `https://www.grupointegrado.br${link}`;
-        }
-
-        const availability = "in stock";
-        const condition = "new";
-        const price = "0.00 BRL";
-        const brand = "Grupo Integrado";
-        const category = determinarCategoria(title, modalidade);
-        const coordenadas = determinarCoordenadas(title, link);
-        const postalCodes = determinarCodigosPostais(title, link);
-
-        // Imagens - priorizar imagem_meta_ads se existir, senão usar banner
-        // imagem_meta_ads agora é múltiplo (array), pega a primeira imagem
-        const imagemMetaAdsArray = attrs.imagem_meta_ads?.data;
-        const imagemMetaAds = Array.isArray(imagemMetaAdsArray) && imagemMetaAdsArray.length > 0
-          ? imagemMetaAdsArray[0]?.attributes
-          : imagemMetaAdsArray?.attributes; // fallback para formato antigo (single)
-        const bannerData = attrs.banner?.data?.attributes;
-        
-        // Imagem principal: usa primeira imagem_meta_ads se existir, senão usa banner
-        const imageUrl = imagemMetaAds?.url || bannerData?.url || "";
-        const image_link = imageUrl
-          ? (imageUrl.startsWith("http") ? imageUrl : `https://cms-site.grupointegrado.br${imageUrl}`)
-          : "";
-        
-        // Imagem adicional: usa formato large/medium da imagem escolhida
-        // Se tiver múltiplas imagens_meta_ads, usa a segunda como adicional
-        let additionalUrl = "";
-        if (imagemMetaAdsArray && Array.isArray(imagemMetaAdsArray) && imagemMetaAdsArray.length > 1) {
-          additionalUrl = imagemMetaAdsArray[1]?.attributes?.formats?.large?.url || 
-                        imagemMetaAdsArray[1]?.attributes?.formats?.medium?.url || 
-                        imagemMetaAdsArray[1]?.attributes?.url || "";
-        } else if (imagemMetaAds) {
-          additionalUrl = imagemMetaAds.formats?.large?.url || 
-                         imagemMetaAds.formats?.medium?.url || "";
-        } else if (bannerData) {
-          additionalUrl = bannerData.formats?.large?.url || 
-                         bannerData.formats?.medium?.url || "";
-        }
-        
-        const additional_image_link = additionalUrl
-          ? (additionalUrl.startsWith("http") ? additionalUrl : `https://cms-site.grupointegrado.br${additionalUrl}`)
-          : "";
-
-        // Separar coordenadas em latitude e longitude (formato oficial do Meta)
-        const [latitude, longitude] = coordenadas.origin.split(',').map(coord => parseFloat(coord.trim()).toFixed(6));
-        const radiusFormatted = formatarRaio(coordenadas.radius);
-
-         const csvRow = [
-           escapeCsvValue(id),
-           escapeCsvValue(title),
-           escapeCsvValue(description),
-           availability,
-           condition,
-           price,
-           escapeCsvValue(link),
-           escapeCsvValue(image_link),
-           escapeCsvValue(brand),
-           escapeCsvValue(category),
-           escapeCsvValue(additional_image_link),
-           escapeCsvValue(latitude),
-           escapeCsvValue(longitude),
-           escapeCsvValue(radiusFormatted.replace(' km', '')),
-           "km",
-           escapeCsvValue(postalCodes),
-         ].join(",");
-
-        csvRows.push(csvRow);
-      } catch (error) {
-        console.warn(`⚠️ Erro ao processar curso ${curso.id || index}:`, error.message);
       }
     });
 
@@ -413,10 +310,21 @@ async function gerarFeedMeta() {
       }
     });
 
-    const totalItens = banners.length + cursosComBanner.length + cursosPaginaComImagem.length;
+    const totalItens = banners.length + cursosPaginaComImagem.length;
     fs.writeFileSync("meta_feed.csv", csvRows.join("\n"), "utf8");
     console.log("📦 Arquivo meta_feed.csv gerado com sucesso!");
-    console.log(`📊 Total de ${totalItens} itens exportados (${banners.length} banners + ${cursosComBanner.length} cursos + ${cursosPaginaComImagem.length} curso-paginas)`);
+    console.log(`📊 Total de ${totalItens} itens exportados (${banners.length} banners + ${cursosPaginaComImagem.length} curso-paginas)`);
+    
+    // Contar quantos estão usando imagem_meta_ads
+    const comImagemMetaAds = cursosPaginaComImagem.filter(cp => {
+      const attrs = cp.attributes;
+      const imagemMetaAdsData = attrs.imagem_meta_ads?.data;
+      const imagemMetaAds = Array.isArray(imagemMetaAdsData) && imagemMetaAdsData.length > 0
+        ? imagemMetaAdsData[0]?.attributes
+        : imagemMetaAdsData?.attributes;
+      return !!imagemMetaAds?.url;
+    });
+    console.log(`📸 ${comImagemMetaAds.length} curso-páginas usando imagem_meta_ads`);
     console.log("💡 Esta versão usa coordenadas GPS (formato Facebook: lat,lng)");
     console.log("🔗 URL fixa: https://raw.githubusercontent.com/Badizan/meta-feed-grupo-integrado/main/meta_feed.csv");
   } catch (error) {
