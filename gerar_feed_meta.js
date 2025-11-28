@@ -223,7 +223,7 @@ async function gerarFeedMeta() {
       try {
         const attrs = cursoPagina.attributes;
         
-        const id = `curso-pagina_${cursoPagina.id || index}`;
+        const baseId = `curso-pagina_${cursoPagina.id || index}`;
         const title = attrs.titulo || "Curso Grupo Integrado";
         const tipoCurso = attrs.tipo_curso || "";
         const modalidade = attrs.Modalidade || "Graduação";
@@ -243,88 +243,130 @@ async function gerarFeedMeta() {
         const coordenadas = determinarCoordenadas(title, link);
         const postalCodes = determinarCodigosPostais(title, link);
 
-        // Imagens - buscar imagem_meta_ads igual imagem_banner
-        // imagem_meta_ads é múltiplo (array), pega a primeira imagem
-        const imagemMetaAdsData = attrs.imagem_meta_ads?.data;
-        const imagemMetaAds = Array.isArray(imagemMetaAdsData) && imagemMetaAdsData.length > 0
-          ? imagemMetaAdsData[0]?.attributes
-          : imagemMetaAdsData?.attributes; // fallback se não for array
-        const bannerData = attrs.imagem_banner?.data?.attributes;
-        
-        // Imagem principal: usa primeira imagem_meta_ads se existir, senão usa imagem_banner
-        const imageUrl = imagemMetaAds?.url || bannerData?.url || "";
-        const image_link = imageUrl
-          ? (imageUrl.startsWith("http") ? imageUrl : `https://cms-site.grupointegrado.br${imageUrl}`)
-          : "";
-        
-        // Debug: mostrar qual tipo de imagem está sendo usada
-        const tipoImagem = imagemMetaAds?.url ? "imagem_meta_ads" : (bannerData?.url ? "imagem_banner" : "NENHUMA");
-        
-        // Imagem adicional: usa formato large/medium da imagem escolhida (igual imagem_banner)
-        let additionalUrl = "";
-        if (imagemMetaAds) {
-          additionalUrl = imagemMetaAds.formats?.large?.url || 
-                         imagemMetaAds.formats?.medium?.url || "";
-        } else if (bannerData) {
-          additionalUrl = bannerData.formats?.large?.url || 
-                         bannerData.formats?.medium?.url || "";
-        }
-        
-        const additional_image_link = additionalUrl
-          ? (additionalUrl.startsWith("http") ? additionalUrl : `https://cms-site.grupointegrado.br${additionalUrl}`)
-          : "";
-
-        // Só adiciona se tiver image_link válido
-        if (!image_link) {
-          console.warn(`⚠️ Curso-pagina ${id} (${title}) não tem imagem válida. Pulando...`);
-          return;
-        }
-
         // Separar coordenadas em latitude e longitude (formato oficial do Meta)
         const [latitude, longitude] = coordenadas.origin.split(',').map(coord => parseFloat(coord.trim()).toFixed(6));
         const radiusFormatted = formatarRaio(coordenadas.radius);
 
-         const csvRow = [
-           escapeCsvValue(id),
-           escapeCsvValue(title),
-           escapeCsvValue(description),
-           availability,
-           condition,
-           price,
-           escapeCsvValue(link),
-           escapeCsvValue(image_link),
-           escapeCsvValue(brand),
-           escapeCsvValue(category),
-           escapeCsvValue(additional_image_link),
-           escapeCsvValue(latitude),
-           escapeCsvValue(longitude),
-           escapeCsvValue(radiusFormatted.replace(' km', '')),
-           "km",
-           escapeCsvValue(postalCodes),
-         ].join(",");
+        // Processar imagem_meta_ads - criar uma linha para CADA imagem
+        const imagemMetaAdsData = attrs.imagem_meta_ads?.data;
+        const bannerData = attrs.imagem_banner?.data?.attributes;
+        
+        if (imagemMetaAdsData) {
+          // Se tem imagem_meta_ads, criar uma linha para cada imagem
+          const imagensArray = Array.isArray(imagemMetaAdsData) ? imagemMetaAdsData : [imagemMetaAdsData];
+          
+          imagensArray.forEach((imagemItem, imgIndex) => {
+            const imagemAttrs = imagemItem?.attributes;
+            if (!imagemAttrs?.url) {
+              console.warn(`⚠️ Curso-pagina ${baseId} (${title}) - Imagem ${imgIndex + 1} não tem URL válida. Pulando...`);
+              return;
+            }
+            
+            const imageUrl = imagemAttrs.url;
+            const image_link = imageUrl.startsWith("http") 
+              ? imageUrl 
+              : `https://cms-site.grupointegrado.br${imageUrl}`;
+            
+            // Imagem adicional: usa formato large/medium da mesma imagem
+            const additionalUrl = imagemAttrs.formats?.large?.url || 
+                                 imagemAttrs.formats?.medium?.url || "";
+            const additional_image_link = additionalUrl
+              ? (additionalUrl.startsWith("http") ? additionalUrl : `https://cms-site.grupointegrado.br${additionalUrl}`)
+              : "";
+            
+            // ID único para cada imagem (adiciona índice da imagem)
+            const id = imagensArray.length > 1 
+              ? `${baseId}_img${imgIndex + 1}` 
+              : baseId;
+            
+            const csvRow = [
+              escapeCsvValue(id),
+              escapeCsvValue(title),
+              escapeCsvValue(description),
+              availability,
+              condition,
+              price,
+              escapeCsvValue(link),
+              escapeCsvValue(image_link),
+              escapeCsvValue(brand),
+              escapeCsvValue(category),
+              escapeCsvValue(additional_image_link),
+              escapeCsvValue(latitude),
+              escapeCsvValue(longitude),
+              escapeCsvValue(radiusFormatted.replace(' km', '')),
+              "km",
+              escapeCsvValue(postalCodes),
+            ].join(",");
 
-        csvRows.push(csvRow);
-        console.log(`✅ Curso-pagina adicionado: ${id} - ${title} - Tipo: ${tipoImagem} - Imagem: ${image_link ? 'OK' : 'FALTANDO'}`);
+            csvRows.push(csvRow);
+            console.log(`✅ Curso-pagina adicionado: ${id} - ${title} - imagem_meta_ads [${imgIndex + 1}/${imagensArray.length}] - Imagem: OK`);
+          });
+        } else if (bannerData?.url) {
+          // Se não tem imagem_meta_ads, usa imagem_banner (fallback)
+          const imageUrl = bannerData.url;
+          const image_link = imageUrl.startsWith("http") 
+            ? imageUrl 
+            : `https://cms-site.grupointegrado.br${imageUrl}`;
+          
+          const additionalUrl = bannerData.formats?.large?.url || 
+                               bannerData.formats?.medium?.url || "";
+          const additional_image_link = additionalUrl
+            ? (additionalUrl.startsWith("http") ? additionalUrl : `https://cms-site.grupointegrado.br${additionalUrl}`)
+            : "";
+
+          const csvRow = [
+            escapeCsvValue(baseId),
+            escapeCsvValue(title),
+            escapeCsvValue(description),
+            availability,
+            condition,
+            price,
+            escapeCsvValue(link),
+            escapeCsvValue(image_link),
+            escapeCsvValue(brand),
+            escapeCsvValue(category),
+            escapeCsvValue(additional_image_link),
+            escapeCsvValue(latitude),
+            escapeCsvValue(longitude),
+            escapeCsvValue(radiusFormatted.replace(' km', '')),
+            "km",
+            escapeCsvValue(postalCodes),
+          ].join(",");
+
+          csvRows.push(csvRow);
+          console.log(`✅ Curso-pagina adicionado: ${baseId} - ${title} - imagem_banner - Imagem: OK`);
+        } else {
+          console.warn(`⚠️ Curso-pagina ${baseId} (${title}) não tem imagem válida. Pulando...`);
+        }
       } catch (error) {
         console.warn(`⚠️ Erro ao processar curso-pagina ${cursoPagina.id || index}:`, error.message);
       }
     });
 
-    const totalItens = banners.length + cursosPaginaComImagem.length;
+    const totalItens = csvRows.length - 1; // -1 porque a primeira linha é o header
     fs.writeFileSync("meta_feed.csv", csvRows.join("\n"), "utf8");
     console.log("📦 Arquivo meta_feed.csv gerado com sucesso!");
-    console.log(`📊 Total de ${totalItens} itens exportados (${banners.length} banners + ${cursosPaginaComImagem.length} curso-paginas)`);
     
-    // Contar quantos estão usando imagem_meta_ads
-    const comImagemMetaAds = cursosPaginaComImagem.filter(cp => {
+    // Contar quantas imagens de imagem_meta_ads foram adicionadas
+    let totalImagensMetaAds = 0;
+    let totalCursosComMetaAds = 0;
+    cursosPaginaComImagem.forEach(cp => {
       const attrs = cp.attributes;
       const imagemMetaAdsData = attrs.imagem_meta_ads?.data;
-      const imagemMetaAds = Array.isArray(imagemMetaAdsData) && imagemMetaAdsData.length > 0
-        ? imagemMetaAdsData[0]?.attributes
-        : imagemMetaAdsData?.attributes;
-      return !!imagemMetaAds?.url;
+      if (imagemMetaAdsData) {
+        const imagensArray = Array.isArray(imagemMetaAdsData) ? imagemMetaAdsData : [imagemMetaAdsData];
+        totalImagensMetaAds += imagensArray.length;
+        totalCursosComMetaAds++;
+      }
     });
-    console.log(`📸 ${comImagemMetaAds.length} curso-páginas usando imagem_meta_ads`);
+    
+    const totalBanners = banners.length;
+    const totalCursoPaginas = totalItens - totalBanners;
+    
+    console.log(`📊 Total de ${totalItens} itens exportados:`);
+    console.log(`   - ${totalBanners} banners`);
+    console.log(`   - ${totalCursoPaginas} linhas de curso-páginas`);
+    console.log(`📸 ${totalCursosComMetaAds} curso-páginas com imagem_meta_ads (${totalImagensMetaAds} imagens no total)`);
     console.log("💡 Esta versão usa coordenadas GPS (formato Facebook: lat,lng)");
     console.log("🔗 URL fixa: https://raw.githubusercontent.com/Badizan/meta-feed-grupo-integrado/main/meta_feed.csv");
   } catch (error) {
